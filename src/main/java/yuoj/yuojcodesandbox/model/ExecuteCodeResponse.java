@@ -31,4 +31,9 @@ public class ExecuteCodeResponse {
     private JudgeInfo judgeInfo;
 
     private Integer time;
+
+    /**
+     * 执行状态
+     */
+    private Integer status1;
 }

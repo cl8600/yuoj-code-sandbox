@@ -3,11 +3,13 @@ package yuoj.yuojcodesandbox;
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.io.resource.ResourceUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.dfa.FoundWord;
+import cn.hutool.dfa.WordTree;
 import yuoj.yuojcodesandbox.model.ExecuteCodeRequest;
 import yuoj.yuojcodesandbox.model.ExecuteCodeResponse;
 import yuoj.yuojcodesandbox.model.ExecuteMessage;
 import yuoj.yuojcodesandbox.model.JudgeInfo;
-import yuoj.yuojcodesandbox.utils.ProcessUtils;
+import yuoj.yuojcodesandbox.security.MySecurityManager;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
@@ -22,12 +24,23 @@ public class JavaNativeCodeSandBox implements CodeSandBox {
     private static final String GLOBAL_CODE_DIR_NAME = "user.dir";
     private static final String GLOBAL_CODE_TEMP_NAME = "tempCode";
     private static final String GLOBAL_JAVA_CLASS_NAME = "Main.java";
+    private static final List<String> blackList = Arrays.asList("Files","exec");
+    private static final WordTree WORDTEREE = new WordTree();
+    private static final String securityManagerPath = "D:\\work\\yuoj-code-sandbox\\src\\main\\java\\yuoj\\yuojcodesandbox\\security\\MySecurityManager.java";
+
+
+
+    static {
+        // 初始化字典树
+        WORDTEREE.addWords(blackList);
+    }
+
 
     public static void main(String[] args) {
         JavaNativeCodeSandBox javaNativeCodeSandBox = new JavaNativeCodeSandBox();
-        //String code = ResourceUtil.readStr("testCode/simpleComputeArgs/Main.java", StandardCharsets.UTF_8);
+        String code = ResourceUtil.readStr("testCode/simpleComputeArgs/Main.java", StandardCharsets.UTF_8);
         // String code = ResourceUtil.readStr("testCode/simpleCompute/Main.java", StandardCharsets.UTF_8);
-        String code = ResourceUtil.readStr("testCode/unsafe/WriteFileErr.java", StandardCharsets.UTF_8);
+        //String code = ResourceUtil.readStr("testCode/unsafe/RunFileErr.java", StandardCharsets.UTF_8);
         List<String> input = Arrays.asList("1 2", "3 4");
         ExecuteCodeRequest executeCodeRequest = ExecuteCodeRequest.builder()
                 .inputList(input)
@@ -40,9 +53,17 @@ public class JavaNativeCodeSandBox implements CodeSandBox {
 
     @Override
     public ExecuteCodeResponse executeCode(ExecuteCodeRequest executeCodeRequest) {
+//        // 实际上只需要限制子程序中
+       // System.setSecurityManager(new MySecurityManager());
 
         List<String> inputList = executeCodeRequest.getInputList();
         String code = executeCodeRequest.getCode();
+        // 校验是否存在危险程序
+//        FoundWord foundWord = WORDTEREE.matchWord(code);
+//        if (foundWord!=null) {
+//            System.out.println("包含敏感词"+foundWord.getFoundWord());
+//            return null;
+//        }
         // 1. 将用户的代码保存为文件
         // step 1:项目根目录新建文件夹tempCode，用于存放临时的代码文件
         // 获取当前用户的工作目录（项目根目录 ）
@@ -75,10 +96,23 @@ public class JavaNativeCodeSandBox implements CodeSandBox {
         List<ExecuteMessage> executeMessageList = new ArrayList<>();
         for (String inputArgs : inputList) {
             // -Dfile.encoding=UTF-8来解决中文乱码，放在 -cp之前
-            compileCmd = String.format("java -Dfile.encoding=UTF-8 -cp %s Main %s", userCodeParentPath, inputArgs);
+            // jvm参数 -Xmx256m表示最大的占用256MB，-Xmx256s是最初直接指定空间节约时间
+            compileCmd = String.format("java -Xmx256m -Dfile.encoding=UTF-8 -cp %s Main %s", userCodeParentPath, inputArgs);
+            //compileCmd = String.format("java -Dfile.encoding=UTF-8 -cp %s;%s -Djava.security.manger=MySecurityManager Main", userCodeParentPath, inputArgs);
             try {
-                Process exec = Runtime.getRuntime().exec(compileCmd);
-                ExecuteMessage executeMessage = runProcessAndGetMessage(exec, "执行");
+                Process process = Runtime.getRuntime().exec(compileCmd);
+                // 超时控制：创建一个线程睡眠120毫秒，如果它睡完这个程序还没执行结束就直接终止该程序
+//                new Thread(()->{
+//                    try {
+//                        Thread.sleep(1500);
+//                        process.destroy();
+//                        System.out.println("超时中断了");
+//                    } catch (InterruptedException e) {
+//                        throw new RuntimeException(e);
+//                    }
+//                }).start();
+
+                ExecuteMessage executeMessage = runProcessAndGetMessage(process, "执行");
                 // ExecuteMessage executeMessage = ProcessUtils.runInteractProcessAndGetMessage(exec, "执行", inputArgs);
                 System.out.println(executeMessage);
                 executeMessageList.add(executeMessage);
@@ -119,10 +153,10 @@ public class JavaNativeCodeSandBox implements CodeSandBox {
         executeCodeResponse.setJudgeInfo(judgeInfo);
 
         // 5. 文件清理，防止内存不足
-//        if (userCodeFile.getParentFile() != null) {
-//            boolean del = FileUtil.del(userCodeParentPath);
-//            System.out.println("删除"+(del?"成功":"失败"));
-//        }
+        if (userCodeFile.getParentFile() != null) {
+            boolean del = FileUtil.del(userCodeParentPath);
+            System.out.println("删除"+(del?"成功":"失败"));
+        }
 
         return executeCodeResponse;
     }
